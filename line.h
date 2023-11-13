@@ -1,40 +1,41 @@
-/// A small `readline`-like with only '\b', in the most unhinged free-form C.
-/// ```c
-/// char* line;
-/// while (printf(">> "), line = line_read()) {
-///     printf("echo: '%s'\n", line);
-/// }
-/// line_free();
-/// ```
-///
-/// To access the history use `line_histget` and `line_histset`.
-/// For completion see `line_compgen`.
-///
-/// The size of the history is fixed at compile-time; the default value is 128
-/// entries, this can by changed by defining `_hist_ln`.
-///
-/// Make sure to only use LINE_IMPLEMENTATION once.
-///
-/// Maybe-interesting-note: as it only use `getchar` and `putchar` these can be
-/// (re-)`#defined` to another target; in that case you will also need to have
-/// ```c
-/// #define tcgetattr(...) 0
-/// #define tcsetattr(...) 0
-/// ```
+/* A small `readline`-like with only '\b', in the most unhinged free-form C.
+ * ```c
+ * char* line;
+ * while (printf(">> "), line = line_read()) {
+ *     printf("echo: '%s'\n", line);
+ * }
+ * line_free();
+ * ```
+ *
+ * To access the history use `line_histget` and `line_histset`.
+ * For completion see `line_compgen`.
+ *
+ * The size of the history is fixed at compile-time; the default value is 128
+ * entries, this can by changed by defining `_hist_ln`.
+ *
+ * Make sure to only use LINE_IMPLEMENTATION once.
+ *
+ * Maybe-interesting-note: as it only use `getchar` and `putchar` these can be
+ * (re-)`#defined` to another target; in that case you will also need to have
+ * ```c
+ * #define tcgetattr(...) 0
+ * #define tcsetattr(...) 0
+ * ```
+ */
 
 #if !defined(getchar) || !defined(putchar)
 #include <stdlib.h>
 #endif
 
 char* line_read(void);
-// this is a direct access to the history (careful with editing it)
+/* this is a direct access to the history (careful with editing it) */
 char** line_histget(size_t* count);
-// the lines are copied using the default allocator
+/* the lines are copied using the default allocator */
 void line_histset(char** lines, size_t count);
-// always call this after at least one `line_read`
+/* always call this after at least one `line_read` */
 void line_free(void);
-// `words` should return a NULL-terminated list of completions insertable as-is
-// `clean` can be NULL, otherwise it is called with the result afterward
+/* `words` should return a NULL-terminated list of completions insertable as-is */
+/* `clean` can be NULL, otherwise it is called with the result afterward */
 void line_compgen(char** (*words)(char* line, size_t point), void (*clean)(char** words));
 
 #ifdef LINE_IMPLEMENTATION
@@ -105,8 +106,9 @@ static size_t _hist_at = 0;
     } while (false)
 
 char* line_read(void) {
-    char* s;
+    char* s, c;
     size_t i = 0;
+    bool reprocess = false;
 
     struct termios term;
     if (tcgetattr(STDIN_FILENO, &term)) {
@@ -115,11 +117,12 @@ char* line_read(void) {
         if (!s) return NULL;
         s[n-1] = ESC;
 
-        char c = getchar();
+        c = getchar();
         if (EOF == c) return NULL;
 
         while (true) {
             if (EOF == c || '\n' == c) {
+                /* XXX: i = 0 ..? */
                 s['\r' == s[i-1] ? i-1 : i] = '\0';
                 break;
             }
@@ -135,10 +138,10 @@ char* line_read(void) {
 
             s[i++] = c;
             c = getchar();
-        } // while true - breaks on eof/eol and alloc fails
+        } /* while true - breaks on eof/eol and alloc fails */
 
         return free(_hist_ls[0]), _hist_ls[0] = s;
-    } // if not tty
+    } /* if not tty */
 
     {
         struct termios raw = term;
@@ -152,15 +155,13 @@ char* line_read(void) {
 
     if (_hist_at) for (s = _hist_ls[_hist_at]; s[i]; i++) putchar(s[i]);
     else if (!_hist_ls[0] || _hist_ls[0][0]) {
-        memmove(_hist_ls+1, _hist_ls, (_hist_ln-1)*sizeof(char*));
         static size_t const n = 64-12;
+        memmove(_hist_ls+1, _hist_ls, (_hist_ln-1)*sizeof(char*));
         _hist_ls[0] = s = calloc(n, 1);
         if (!s) goto done;
         s[n-1] = ESC;
     } else s = _hist_ls[0];
 
-    bool reprocess = false;
-    char c;
     while (true) {
         if (!reprocess) c = getchar();
         else reprocess = false;
@@ -183,7 +184,7 @@ char* line_read(void) {
                     case 'd':
                         if (s[i]) {
                             size_t j = i, k;
-                            WORD_FWD();
+                            WORD_FWD(;);
                             for (k = j; s[i]; k++, i++) putchar(s[k] = s[i]);
                             s[k] = '\0';
                             for (; k != i; k++) putchar(' ');
@@ -213,8 +214,9 @@ char* line_read(void) {
 
                     case 't':
                         if (i) {
-                            size_t j = i, bst, ben, fst, fen;
+                            size_t j = i, k, bst, ben, fst, fen, len;
                             bool found = false;
+                            char* cpy;
                             WORD_BKW(if (!found && IS_LETTER(s[i])) { found = true; ben = i+1; });
                             bst = i;
                             i = j;
@@ -233,14 +235,14 @@ char* line_read(void) {
                                 if (!found) break;
                             }
                             i = j;
-                            size_t len = strlen(s);
-                            char* cpy = malloc(len);
+                            len = strlen(s);
+                            cpy = malloc(len);
                             if (!cpy) break;
                             memcpy(cpy, s, len);
                             for (; i != bst; i--) putchar('\b');
-                            for (size_t k = fst; k != fen; k++, i++) putchar(s[i] = cpy[k]);
-                            for (size_t k = ben; k != fst; k++, i++) putchar(s[i] = cpy[k]);
-                            for (size_t k = bst; k != ben; k++, i++) putchar(s[i] = cpy[k]);
+                            for (k = fst; k != fen; k++, i++) putchar(s[i] = cpy[k]);
+                            for (k = ben; k != fst; k++, i++) putchar(s[i] = cpy[k]);
+                            for (k = bst; k != ben; k++, i++) putchar(s[i] = cpy[k]);
                             free(cpy);
                         }
                         break;
@@ -249,7 +251,7 @@ char* line_read(void) {
                         WORD_FWD(putchar(IS_LETTER(s[i]) ? s[i]&=~32 : s[i]));
                         break;
                 }
-                break; // case ESC
+                break; /* case ESC */
 
             case CTRL(']'):
                 for (c = getchar(); s[i] && c != s[i]; i++) putchar(s[i]);
@@ -267,12 +269,12 @@ char* line_read(void) {
                 putchar('^');
                 putchar('C');
                 s[0] = '\0';
-                // fall through
+                /* fall through */
             case CTRL('M'):
             case CTRL('J'):
                 if (s[0] && 1 < _hist_at) strcpy(_hist_ls[0], s);
                 _hist_at = 0;
-                // fall through
+                /* fall through */
             case CTRL('O'):
                 if (_hist_at) _hist_at--;
                 putchar('\r');
@@ -290,7 +292,7 @@ char* line_read(void) {
                     }
                     break;
                 }
-                // fall through
+                /* fall through */
             case EOF:
                 s = NULL;
                 goto done;
@@ -319,16 +321,17 @@ char* line_read(void) {
                 if (_compgen_words) {
                     char** words = _compgen_words(s, i);
                     while (words && words[0]) {
-                        size_t k, j = 0;
+                        size_t k, j = 0, l, n, il;
+                        char* cpy;
                         for (k = 0; words[k]; k++) {
                             size_t l = strlen(words[k]);
                             if (j < l) j = l;
                         }
                         for (k = i; ESC != s[k]; k++);
-                        size_t n = (k+1)+12;
+                        n = (k+1)+12;
                         while (n < k+j) n*= 2;
                         n-= 12;
-                        char* cpy = malloc(n);
+                        cpy = malloc(n);
                         if (!cpy) break;
                         memcpy(cpy, s, k);
                         if (n-k-1) memset(cpy+k+1, '\0', n-k-2);
@@ -340,15 +343,14 @@ char* line_read(void) {
                         k = 0;
                         j = i;
                         while (true) {
+                            bool z = false;
                             for (; j != i; i--) putchar('\b');
                             for (; words[k][i-j]; i++) putchar(s[i] = words[k][i-j]);
-                            size_t l = 0;
-                            bool z = false;
-                            for (; cpy[j+l]; l++) {
+                            for (l = 0; cpy[j+l]; l++) {
                                 z = z || !s[i+l];
                                 putchar(s[i+l] = cpy[j+l]);
                             }
-                            size_t il = i+l;
+                            il = i+l;
                             if (!z) for (; s[i+l]; l++) putchar(' ');
                             s[il] = '\0';
                             for (; l; l--) putchar('\b');
@@ -357,7 +359,7 @@ char* line_read(void) {
                         }
                         free(cpy);
                         break;
-                    } // if words (while, so that it can break)
+                    } /* if words (while, so that it can break) */
                     if (_compgen_clean) _compgen_clean(words);
                 }
                 break;
@@ -405,10 +407,9 @@ char* line_read(void) {
             case CTRL('S'):
                 {
                     char sr_s[32];
-                    size_t sr_i = 0;
+                    size_t sr_i = i, j, k;
                     bool rev = c == CTRL('R');
                     sr_s[0] = '\0';
-                    sr_i = i;
                     for (; s[sr_i]; sr_i++) putchar(' ');
                     for (; sr_i; sr_i--) putchar('\b');
                     putchar('^');
@@ -419,16 +420,15 @@ char* line_read(void) {
                     sr_s[sr_i = 0] = '\0';
                     while (true) {
                         putchar('|');
-                        size_t k = 0;
-                        for (; s[k]; k++) putchar(s[k]);
+                        for (k = 0; s[k]; k++) putchar(s[k]);
                         k++, putchar(' ');
                         for (; k != i; k--) putchar('\b');
                         c = getchar();
                         if (' ' <= c && c <= '~' && sr_i <31) {
-                            for (size_t k = i+1; k != 0; k--) putchar('\b');
+                            for (k = i+1; k != 0; k--) putchar('\b');
                             putchar(sr_s[sr_i++] = c);
                         } else if ((DEL == c || CTRL('H') == c) && sr_i) {
-                            for (size_t k = i+2; k != 0; k--) putchar('\b');
+                            for (k = i+2; k != 0; k--) putchar('\b');
                             --sr_i;
                         } else {
                             reprocess = /*ESC != c &&*/ CTRL('G') != c && (rev ? CTRL('R') : CTRL('S')) != c;
@@ -439,28 +439,26 @@ char* line_read(void) {
                             char* at = strstr(_hist_ls[_hist_at], sr_s);
                             if (!at) rev ? _hist_at++ : _hist_at--;
                             else {
-                                size_t k = 1;
                                 putchar(' ');
-                                for (; s[k]; k++) putchar(' ');
+                                for (k = 1; s[k]; k++) putchar(' ');
                                 for (; k; k--) putchar('\b');
                                 i = at - (s = _hist_ls[_hist_at]);
                                 break;
                             }
-                        } // while strstr
-                    } // while true - getchar (also breaks if not handled)
-                    size_t k = i+sr_i+4;
-                    for (; k; k--) putchar('\b');
+                        } /* while strstr */
+                    } /* while true - getchar (also breaks if not handled) */
+                    for (k = i+sr_i+4; k; k--) putchar('\b');
                     for (; s[k]; k++) putchar(s[k]);
-                    for (size_t j = 0; j != sr_i+4; j++, k++) putchar(' ');
+                    for (j = 0; j != sr_i+4; j++, k++) putchar(' ');
                     for (; k != i; k--) putchar('\b');
                 }
-                break; // case ^R/^S
+                break; /* case ^R/^S */
 
             case CTRL('T'):
                 if (i) {
+                    char p = s[i-1];
                     if (!s[i]) i--, putchar('\b');
                     putchar('\b');
-                    char p = s[i-1];
                     putchar(s[i-1] = s[i]);
                     putchar(s[i++] = p);
                 }
@@ -491,8 +489,8 @@ char* line_read(void) {
             default:
                 if (' ' <= c && c <= '~') {
                     char p = s[i];
+                    size_t k = i+1;
                     putchar(s[i++] = c);
-                    size_t k = i;
                     while (p) {
                         char w = s[k];
                         putchar(s[k++] = p);
@@ -508,8 +506,8 @@ char* line_read(void) {
                     s[k] = p;
                     for (; k != i; k--) putchar('\b');
                 }
-        } // switch c
-    } // while true
+        } /* switch c */
+    } /* while true */
 
 done:
     tcsetattr(STDIN_FILENO, TCSANOW, &term);
@@ -522,8 +520,9 @@ char** line_histget(size_t* count) {
 }
 
 void line_histset(char** lines, size_t count) {
+    size_t k;
     line_free();
-    if (lines && count) for (size_t k = 0; count && k < _hist_ln; count--, k++) {
+    if (lines && count) for (k = 0; count && k < _hist_ln; count--, k++) {
         size_t l = strlen(lines[k]), n = 64;
         while (n < l) n*= 2;
         n-= 12;
@@ -534,7 +533,8 @@ void line_histset(char** lines, size_t count) {
 }
 
 void line_free(void) {
-    for (size_t k = _hist_at = 0; k < _hist_ln; k++) _hist_ls[k] = (free(_hist_ls[k]), NULL);
+    size_t k;
+    for (k = _hist_at = 0; k < _hist_ln; k++) _hist_ls[k] = (free(_hist_ls[k]), NULL);
 }
 
 void line_compgen(char** (*words)(char* line, size_t point), void (*clean)(char** words)) {
@@ -548,4 +548,4 @@ void line_compgen(char** (*words)(char* line, size_t point), void (*clean)(char*
 #undef IS_WORD
 #undef WORD_BKW
 #undef WORD_FWD
-#endif // LINE_IMPLEMENTATION
+#endif /* LINE_IMPLEMENTATION */

@@ -137,7 +137,7 @@ khor_slice khor_lex(khor_slice* s) {
         while (s->len && '"' != *s->ptr);
         if (s->len) next();
     } else if ('(' == *s->ptr || ')' == *s->ptr) next();
-    else while (s->len && !strchr(" \t\r\n\"()", *s->ptr)) next();
+    else while (s->len && !strchr(" \t\r\n\"();", *s->ptr)) next();
     r.len = s->ptr - r.ptr;
 #   undef next
     return r;

@@ -1,5 +1,5 @@
-CFLAGS = -Wall -Wextra -pedantic #-ansi
+CFLAGS = -Wall -Wextra -pedantic -ansi #-O3
 LDFLAGS = 
 
-i: *.[ch]; $(CC) $^ -o $@ $(CFLAGS) $(LDFLAGS) -O3
+i: *.[ch]; $(CC) $^ -o $@ $(CFLAGS) $(LDFLAGS)
 d: *.[ch]; $(CC) $^ -o $@ $(CFLAGS) $(LDFLAGS) -ggdb

@@ -3,16 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
-/* line.h not ANSI- */
-#ifdef __STDC_VERSION__
-# define LINE_IMPLEMENTATION
-# include "line.h"
-#else
-static char _static_line[2048];
-# define line_read() gets(_static_line)
-# define line_free()
-#endif
-
+#define LINE_IMPLEMENTATION
+#include "line.h"
 #define KHOR_IMPLEMENTATION
 #include "khor.h"
 
@@ -67,11 +59,60 @@ void dump(khor_object const* self) {
 }
 
 void dumpcode(khor_bytecode const* code) {
-    size_t k;
-    for (k = 0; k < code->len; k++) {
-        if (' ' <= code->ptr[k] && code->ptr[k] <= '~')
-            printf( "[%5lu] 0x%02X %c\n", k, code->ptr[k] & 255, code->ptr[k]);
-        else printf("[%5lu] 0x%02X\n",    k, code->ptr[k] & 255);
+    unsigned cp, k;
+    for (cp = 0; cp < code->len; cp++) {
+        printf("[+%4u] ", cp);
+        switch (code->ptr[cp]) {
+            case KHOR_OP_MKNUM:
+                printf("mknum    %f", *(double*)(code->ptr+cp+1));
+                cp+= 8;
+                break;
+            case KHOR_OP_MKSTR:
+                k = code->ptr[cp+1]<<16 | code->ptr[cp+2]<<8 | code->ptr[cp+3];
+                printf("mkstr    %u", k);
+                cp+= 3+k;
+                break;
+            case KHOR_OP_MKLST:
+                k = code->ptr[cp+1]<<16 | code->ptr[cp+2]<<8 | code->ptr[cp+3];
+                printf("mklst    %u", k);
+                cp+= 3;
+                break;
+            /*case KHOR_OP_MKLBD:   printf("mklbd");   break;*/
+            case KHOR_OP_MKSYM:
+                printf("mksym    ");
+                for (k = 0; KHOR_SYMBOL < code->ptr[cp+1]; k++, cp++) printf("%c", code->ptr[cp+1]);
+                break;
+            case KHOR_OP_MKNIL:   printf("mknil");   break;
+            case KHOR_OP_HALT:    printf("halt     %d", code->ptr[++cp]); break;
+            case KHOR_OP_RESOLVE: printf("resolve"); break;
+            case KHOR_OP_DEFINE:  printf("define");  break;
+            case KHOR_OP_APPLY:   printf("apply    %d", code->ptr[++cp]); break;
+            case KHOR_OP_JUMP:
+                k = code->ptr[cp+1]<<8 | code->ptr[cp+2];
+                printf("jump     %d (-> %u)", k, cp+3+k);
+                cp+= 2;
+                break;
+            case KHOR_OP_JUMPIF:
+                k = code->ptr[cp+1]<<8 | code->ptr[cp+2];
+                printf("jumpif   %d (-> %u)", k, cp+3+k);
+                cp+= 2;
+                break;
+            case KHOR_OP_ADD:     printf("add");     break;
+            case KHOR_OP_SUB:     printf("sub");     break;
+            case KHOR_OP_MUL:     printf("mul");     break;
+            case KHOR_OP_DIV:     printf("div");     break;
+            case KHOR_OP_LT:      printf("lt");      break;
+            case KHOR_OP_GT:      printf("gt");      break;
+            case KHOR_OP_LE:      printf("le");      break;
+            case KHOR_OP_GE:      printf("ge");      break;
+            case KHOR_OP_EQ:      printf("eq");      break;
+            case KHOR_OP_AND:     printf("and");     break;
+            case KHOR_OP_OR:      printf("or");      break;
+            case KHOR_OP_CATS:    printf("cats");    break;
+            default:
+                printf(' ' <= code->ptr[cp] && code->ptr[cp] <= '~' ? "; err: 0x%02X (%c)\n" : "; err: 0x%02X", (unsigned)code->ptr[cp], code->ptr[cp]);
+        }
+        printf("\n");
     }
 }
 
