@@ -1,17 +1,22 @@
-(rules not (o) (if o () 1))
+(rules not ($o) (if $o () 1))
 
-(rules and
-       (o) o
-       (h t+) (if h (and t+) ())
-(rules or
-       (o) o
-       ;(h t+) (if h h (or t+))
-       (h t+) (_or h (or t+)))
-(define _or (lambda (h t) (if h h t)))
+(rules and!
+       ($o) $o
+       ($h $t+) (if $h (and! $t+) ())
+(rules or!
+       ($o) $o
+       ;($h $t+) (if $h $h (or $t+))
+       ($h $t+) (_or $h (or! $t+)))
+(define _or (lambda ($h t) (if $h $h t)))
 
 (rules cond
-       (hc hv)      (cond hc hv ())
-       (hc hv o)    (if hc hv o)
-       (hc hv o t+) (if hc hv (cond o t+)))
+       ($hc $hv)      (cond $hc $hv ())
+       ($hc $hv $o)    (if $hc $hv $o)
+       ($hc $hv $o $t+) (if $hc $hv (cond $o $t+)))
 
-(rules halta (f a*) (halt (f a*)))
+(rules halta ($f $a*) (halt ($f $a*)))
+
+(rules defun ($name $args $body+)
+       (define $name
+         (lambda $args
+           (progn $body+))))

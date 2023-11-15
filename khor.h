@@ -2,7 +2,9 @@
 #include <stdlib.h>
 
 #define KHOR_VERSION 0
+/* ZZZ: ! */
 #define KHOR_IMPLEMENTATION
+/* ZZZ: ! */
 
 #define dyarr(__elty) struct { __elty* ptr; size_t len, cap; }
 #define slarr(__elty) struct { __elty* ptr; size_t len; }
@@ -37,6 +39,7 @@ enum khor_op {
     KHOR_OP_MKSYM,     /*   0 -- 1                      */
     KHOR_OP_MKNIL,     /*   0 -- 1                      */
     KHOR_OP_HALT,      /*   0 -- 0 (+next :1)           */
+    KHOR_OP_DISCARD,   /*   1 -- 0                      */
     KHOR_OP_RESOLVE,   /*   1 -- 1                      */
     KHOR_OP_DEFINE,    /*   2 -- 1                      */
     KHOR_OP_APPLY,     /* 1+n -- 1 (+next n:1)          */
@@ -56,7 +59,7 @@ enum khor_op {
     KHOR_OP_CATS,      /*   2 -- 1                      */
     KHOR_OP_FF = 255
 };
-#define COUNT_OPS 23
+#define KHOR_COUNT_OPS 24
 
 typedef struct khor_rule {
     khor_object subst;
@@ -83,6 +86,7 @@ typedef bool (* khor_handler)(khor_bytecode* code, khor_environment* env, khor_s
 
 khor_slice   khor_lex      (khor_slice* s);
 khor_object  khor_parse    (khor_slice* s, khor_ruleset* macros);
+khor_object  khor_trysubst (khor_list const* node, khor_rules const* rules, unsigned* matched);
 void         khor_compile  (khor_object const* node, khor_bytecode* res);
 void         khor_eval     (khor_bytecode* code, khor_environment* env, khor_stack* stack, khor_handler handle);
 khor_object* khor_lookup   (khor_environment const* env, khor_symbol const* key);
@@ -91,7 +95,14 @@ void         khor_destroy  (khor_object* self);
 
 #ifdef KHOR_IMPLEMENTATION
 
+/* ZZZ: ! */
+void dump(khor_object const* self);
+void dumpcode(khor_bytecode const* code);
+void dumpenv(khor_environment const* env);
+void dumpmacros(khor_ruleset const* macros);
 #include <stdio.h>
+/* ZZZ: ! */
+
 #include <string.h>
 
 /* clears it empty and frees used memory */
@@ -207,21 +218,116 @@ khor_object khor_parse(khor_slice* s, khor_ruleset* macros) {
                 }
             rules_fail:
                 slarr_free(&r.lst);
-            } else for (k = 0; k < macros->len; k++) if (!strcmp(macros->ptr[k].key.txt, arr.ptr[0].sym.txt)) {
-                unsigned i, j;
-                bool matched = false;
-                puts("WIP: found macro by name");
-                for (j = 0; j < macros->ptr[k].rules.len; j++) {
-                    khor_rule const* it = macros->ptr[k].rules.ptr+j;
-                    printf("NIY: testing rule with %lu name:", it->names.len);
-                    for (i = 0; i < it->names.len; i++) printf(" %s", it->names.ptr[i].txt);
-                    puts("");
+            } else for (k = 0; k < macros->len; k++) {
+                unsigned matched;
+                khor_object niw = khor_trysubst(&r.lst, macros->ptr+k, &matched);
+                if (matched < macros->ptr[k].rules.len) {
+                    khor_destroy(&r);
+                    r = niw;
+                    break;
                 }
-                if (!matched) puts("no matching rule");
-                break;
+                /* TODO: again */
             }
         }
     } else memcpy(r.sym.txt, token.ptr, token.len < 15 ? token.len : 15);
+    return r;
+}
+
+void _khor_rsubst(khor_list* self, khor_symbol const* name, khor_object** ptr, size_t len) {
+    unsigned k;
+    dyarr(khor_object) arr = {0};
+    arr.ptr = self->ptr;
+    arr.len = arr.cap = self->len;
+    for (k = 0; k < arr.len; k++) {
+        if (KHOR_LIST == arr.ptr[k].ty) _khor_rsubst(&arr.ptr[k].lst, name, ptr, len);
+        else if (KHOR_SYMBOL < arr.ptr[k].ty && !strcmp(name->txt, arr.ptr[k].sym.txt)) {
+            khor_object* at = dyarr_insert(&arr, k+1, len-1)-1;
+            unsigned l;
+            for (l = 0; l < len; l++) at[l] = khor_duplicate(ptr[l]);
+            k+= len-1;
+        }
+    }
+    self->len = arr.len;
+    self->ptr = arr.ptr;
+}
+
+khor_object khor_trysubst(khor_list const* list, khor_rules const* rules, unsigned* matched) {
+    unsigned k, s;
+    dyarr(khor_object*)* map;
+    khor_object r;
+    r.ty = KHOR_LIST;
+    r.lst.len = 0;
+    r.lst.ptr = NULL;
+    if (!list->len || strcmp(rules->key.txt, list->ptr->sym.txt)) return r;
+    for (k = 0, s = 0; k < rules->rules.len; ++k)
+        if (s < rules->rules.ptr[k].names.len) s = rules->rules.ptr[k].names.len;
+    map = calloc(s, sizeof(dyarr(khor_object*)));
+    for (*matched = 0; *matched < rules->rules.len; ++*matched) {
+        khor_rule const* it = rules->rules.ptr+*matched;
+        for (k = 1, s = 0; k < list->len; k++) {
+            char* cpat, * npat;
+            bool issym;
+            if (it->names.len == s) {
+                s++;
+                break;
+            }
+            cpat = it->names.ptr[s].txt;
+            issym = KHOR_SYMBOL < list->ptr[k].ty;
+            if ('$' != *cpat) {
+                if (!issym || strcmp(list->ptr[k].sym.txt, cpat)) break;
+                s++;
+                continue;
+            }
+            npat = it->names.len == s+1 ? NULL : it->names.ptr[s+1].txt;
+            switch (cpat[strlen(cpat)-1]) {
+                case '?':
+                    if (!npat) {
+                        if (list->len-k < 2) {
+                            if (list->len == k+1) *dyarr_push(map+s) = list->ptr+k;
+                            s++;
+                        } else k = list->len;
+                    } else if (issym && !strcmp(list->ptr[k].sym.txt, npat)) s+= 2;
+                    else *dyarr_push(map+s) = list->ptr+k;
+                    continue;
+                case '+':
+                case '*':
+                    if (!npat) for (s++; k < list->len; k++) *dyarr_push(map+s-1) = list->ptr+k;
+                    else if (issym && !strcmp(list->ptr[k].sym.txt, npat)) s+= 2;
+                    else *dyarr_push(map+s) = list->ptr+k;
+                    continue;
+                default:
+                    *dyarr_push(map+s) = list->ptr+k;
+                    s++;
+                    continue;
+            }
+        }
+        if (it->names.len == s+1 && '$' == *it->names.ptr[s].txt) {
+            char ch = it->names.ptr[s].txt[strlen(it->names.ptr[s].txt)-1];
+            if ('?' == ch || '*' == ch) s++;
+        }
+        if (it->names.len == s) {
+            printf("rule %u did match\n", *matched);
+            r = khor_duplicate(&it->subst);
+            while (s) if ('$' == *it->names.ptr[--s].txt) {
+                switch (r.ty) {
+                    case KHOR_NUMBER:
+                    case KHOR_STRING:
+                        break;
+                    case KHOR_LIST:
+                        _khor_rsubst(&r.lst, it->names.ptr+s, map[s].ptr, map[s].len);
+                        break;
+                    default:
+                        if (map[s].len && !strcmp(it->names.ptr[s].txt, r.sym.txt))
+                            r = khor_duplicate(*map[s].ptr);
+                        break;
+                }
+                dyarr_clear(map+s);
+            }
+            break;
+        }
+        while (s) if ('$' == *it->names.ptr[--s].txt) dyarr_clear(map+s);
+    }
+    free(map);
     return r;
 }
 
@@ -259,6 +365,16 @@ void khor_compile(khor_object const* node, khor_bytecode* res) {
                             res->ptr[res->len-1] = argv[1].num.val;
                             khor_compile(argv+2, res);
                         } else *dyarr_push(res) = KHOR_OP_MKNIL;
+                        break;
+                    } else if (symeq("progn")) {
+                        if (1 == argc) *dyarr_push(res) = KHOR_OP_MKNIL;
+                        else {
+                            khor_compile(argv+1, res);
+                            for (k = 2; k < argc; k++) {
+                                *dyarr_push(res) = KHOR_OP_DISCARD;
+                                khor_compile(argv+k, res);
+                            }
+                        }
                         break;
                     } else if (symeq("list")) {
                         for (k = 1; k < (argc & 65535); k++) khor_compile(argv+k, res);
@@ -320,9 +436,12 @@ void khor_compile(khor_object const* node, khor_bytecode* res) {
                                       : '>' == *argv->sym.txt ? ('=' == argv->sym.txt[1] ? KHOR_OP_GE : KHOR_OP_GT)
                                       : '=' == *argv->sym.txt ? KHOR_OP_EQ
                                       : 0;
-                        khor_compile(argv+1, res);
-                        khor_compile(argv+2, res);
-                        *dyarr_push(res) = op;
+                        if (argc <3) *dyarr_push(res) = KHOR_OP_MKNIL;
+                        else {
+                            khor_compile(argv+1, res);
+                            khor_compile(argv+2, res);
+                            *dyarr_push(res) = op;
+                        }
                         break;
                     } else if (symeq("+") || symeq("-") || symeq("*") || symeq("/") || symeq("and") || symeq("or") || symeq("..")) {
                         char const op = '+' == *argv->sym.txt ? KHOR_OP_ADD
@@ -333,10 +452,13 @@ void khor_compile(khor_object const* node, khor_bytecode* res) {
                                       : 'o' == *argv->sym.txt ? KHOR_OP_OR
                                       : '.' == *argv->sym.txt ? KHOR_OP_CATS
                                       : 0;
-                        khor_compile(argv+1, res);
-                        for (k = 2; k < argc; k++) {
-                            khor_compile(argv+k, res);
-                            *dyarr_push(res) = op;
+                        if (1 == argc) *dyarr_push(res) = KHOR_OP_MKNIL;
+                        else {
+                            khor_compile(argv+1, res);
+                            for (k = 2; k < argc; k++) {
+                                khor_compile(argv+k, res);
+                                *dyarr_push(res) = op;
+                            }
                         }
                         break;
                     }
@@ -401,6 +523,9 @@ void khor_eval(khor_bytecode* code, khor_environment* env, khor_stack* stack, kh
         case KHOR_OP_HALT:
             if (!handle(code, env, stack, &cp, &sp, code->ptr[cp+1])) return;
             cp++;
+            break;
+        case KHOR_OP_DISCARD:
+            khor_destroy(stack->ptr+--sp);
             break;
         case KHOR_OP_RESOLVE:
             if (KHOR_SYMBOL < stack->ptr[sp-1].ty) {
@@ -503,7 +628,7 @@ void khor_eval(khor_bytecode* code, khor_environment* env, khor_stack* stack, kh
     }
 #   undef isnil
 #   undef mknil
-#   if 23 != COUNT_OPS
+#   if 24 != KHOR_COUNT_OPS
 #   error "missing op in khor_eval!"
 #   endif
 }

@@ -1,15 +1,16 @@
 fu s:khor_ft()
   setl com=b:; def=define\|rules lisp
 
-  sy cluster khorAtom contains=khorNumber,khorString,khorSymbol
+  sy cluster khorAtom contains=khorNumber,khorString,khorRuleToken,khorSymbol
   sy match   khorComment /;.*/
 
+  sy match   khorRuleToken /$[^ \t\r\n"();]\+/
   sy match   khorSymbol /[^ \t\r\n"();]\+/
   sy match   khorNumber /-\?\d\+/
   sy region  khorString start=/"/ skip=/\\./ end=/"/
 
-  sy cluster khorFirst contains=khorKeyword,khorOperator,khorSymbol
-  sy keyword khorKeyword define halt if lambda list rules contained
+  sy cluster khorFirst contains=khorKeyword,khorOperator,khorRuleToken,khorSymbol
+  sy keyword khorKeyword define halt if lambda list progn rules contained
   sy match   khorOperator "\V<\|>\|<=\|>=\|=\|+\|-\|*\|/\|and\|or\|.." contained
   sy match   khorOpen /(/ nextgroup=@khorFirst
 
@@ -19,6 +20,7 @@ fu s:khor_ft()
   hi def link khorList      Special
   hi def link khorKeyword   Keyword
   hi def link khorOperator  Operator
+  hi def link khorRuleToken Identifier
   hi def link khorUnmatched Error
 endf
 

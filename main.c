@@ -84,6 +84,7 @@ void dumpcode(khor_bytecode const* code) {
                 break;
             case KHOR_OP_MKNIL:   printf("mknil");   break;
             case KHOR_OP_HALT:    printf("halt     %d", code->ptr[++cp]); break;
+            case KHOR_OP_DISCARD: printf("discard"); break;
             case KHOR_OP_RESOLVE: printf("resolve"); break;
             case KHOR_OP_DEFINE:  printf("define");  break;
             case KHOR_OP_APPLY:   printf("apply    %d", code->ptr[++cp]); break;
@@ -114,6 +115,9 @@ void dumpcode(khor_bytecode const* code) {
         }
         printf("\n");
     }
+#   if 24 != KHOR_COUNT_OPS
+#   error "missing op in dumpcode!"
+#   endif
 }
 
 void dumpenv(khor_environment const* env) {
@@ -155,7 +159,7 @@ bool thandle(khor_bytecode* code, khor_environment* env, khor_stack* stack, unsi
     return !so;
 }
 
-int main(void) {
+int main(int argc, char** argv) {
     size_t k;
     khor_slice source;
     khor_object ast;
@@ -165,6 +169,60 @@ int main(void) {
     khor_stack stack = {0};
 
     (void)dyarr_insert(&stack, 0, 1024);
+
+    for (k = 1; (int)k < argc; k++) if ('-' == argv[k][0]) switch (argv[k][1]) {
+        case 'h':
+            printf("Usage: %s <idk>\n", argv[0]);
+            return 1;
+
+        case 'p':
+            if ((int)++k == argc) {
+                printf("Expected argument for -p\n");
+                return 1;
+            } else {
+                FILE* f = fopen(argv[k], "r");
+                if (!f) {
+                    printf("Could not read file '%s'\n", argv[k]);
+                    return 1;
+                }
+                fseek(f, 0, SEEK_END);
+                source.len = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                source.ptr = malloc(source.len);
+                if (source.ptr) {
+                    fread(source.ptr, source.len, 1, f);
+
+                    ast = khor_parse(&source, &macros);
+                    khor_compile(&ast, &code);
+                    khor_destroy(&ast);
+                    khor_eval(&code, &env, &stack, thandle);
+                    dyarr_clear(&code);
+                    khor_destroy(stack.ptr);
+
+                    free(source.ptr);
+                }
+                fclose(f);
+            }
+            break;
+
+        case 'c':
+            if ((int)++k == argc) {
+                printf("Expected argument for -c\n");
+                return 1;
+            }
+            source.len = strlen(argv[k]);
+            source.ptr = argv[k];
+
+            ast = khor_parse(&source, &macros);
+            khor_compile(&ast, &code);
+            khor_destroy(&ast);
+            khor_eval(&code, &env, &stack, thandle);
+            dyarr_clear(&code);
+            khor_destroy(stack.ptr);
+
+            break;
+
+    } else printf("Unexpected argument: '%s'\n", argv[k]);
 
     while ((source.ptr = line_read())) if (*source.ptr) {
 #       define cmdeq(__c) (!memcmp(__c, source.ptr, strlen(__c)))
