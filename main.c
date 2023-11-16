@@ -187,19 +187,22 @@ int main(int argc, char** argv) {
                 }
                 fseek(f, 0, SEEK_END);
                 source.len = ftell(f);
-                fseek(f, 0, SEEK_SET);
                 source.ptr = malloc(source.len);
                 if (source.ptr) {
+                    char* txt = source.ptr;
+                    fseek(f, 0, SEEK_SET);
                     fread(source.ptr, source.len, 1, f);
 
-                    ast = khor_parse(&source, &macros);
-                    khor_compile(&ast, &code);
-                    khor_destroy(&ast);
-                    khor_eval(&code, &env, &stack, thandle);
-                    dyarr_clear(&code);
-                    khor_destroy(stack.ptr);
+                    while (source.len) {
+                        ast = khor_parse(&source, &macros);
+                        khor_compile(&ast, &code);
+                        khor_destroy(&ast);
+                        khor_eval(&code, &env, &stack, thandle);
+                        dyarr_clear(&code);
+                        khor_destroy(stack.ptr);
+                    }
 
-                    free(source.ptr);
+                    free(txt);
                 }
                 fclose(f);
             }

@@ -202,9 +202,13 @@ khor_object khor_parse(khor_slice* s, khor_ruleset* macros) {
                 khor_rules* niw;
                 if (arr.len <3 || arr.len & 1 || arr.ptr[1].ty < KHOR_SYMBOL) goto rules_fail;
                 for (k = 2; k < arr.len; k+= 2) {
+                    bool last_had_q = false;
                     if (KHOR_LIST != arr.ptr[k].ty) goto rules_fail;
-                    for (j = 0; j < arr.ptr[k].lst.len; j++)
-                        if (arr.ptr[k].lst.ptr[j].ty < KHOR_SYMBOL) goto rules_fail;
+                    for (j = 0; j < arr.ptr[k].lst.len; j++) {
+                        khor_object const* it = arr.ptr[k].lst.ptr+j;
+                        if (it->ty < KHOR_SYMBOL || (last_had_q && '$' == *it->sym.txt)) goto rules_fail;
+                        last_had_q = '$' == *it->sym.txt && strchr("?+*", it->sym.txt[strlen(it->sym.txt)-1]);
+                    }
                 }
                 niw = dyarr_push(macros);
                 niw->key = arr.ptr[1].sym;
@@ -258,7 +262,10 @@ khor_object khor_trysubst(khor_list const* list, khor_rules const* rules, unsign
     r.ty = KHOR_LIST;
     r.lst.len = 0;
     r.lst.ptr = NULL;
-    if (!list->len || strcmp(rules->key.txt, list->ptr->sym.txt)) return r;
+    if (!list->len || strcmp(rules->key.txt, list->ptr->sym.txt)) {
+        *matched = rules->rules.len;
+        return r;
+    }
     for (k = 0, s = 0; k < rules->rules.len; ++k)
         if (s < rules->rules.ptr[k].names.len) s = rules->rules.ptr[k].names.len;
     map = calloc(s, sizeof(dyarr(khor_object*)));
@@ -306,7 +313,6 @@ khor_object khor_trysubst(khor_list const* list, khor_rules const* rules, unsign
             if ('?' == ch || '*' == ch) s++;
         }
         if (it->names.len == s) {
-            printf("rule %u did match\n", *matched);
             r = khor_duplicate(&it->subst);
             while (s) if ('$' == *it->names.ptr[--s].txt) {
                 switch (r.ty) {
